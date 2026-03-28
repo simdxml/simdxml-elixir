@@ -27,11 +27,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Extract version
+        shell: bash
+        run: |
+          VERSION=$(grep '@version "' mix.exs | cut -d'"' -f2)
+          echo "PROJECT_VERSION=$VERSION" >> $GITHUB_ENV
+
       - name: Build NIF
+        id: build
         uses: philss/rustler-precompiled-action@v1.1.4
         with:
           project-name: simdxml_nif
-          project-version: ${{ github.ref_name }}
+          project-version: ${{ env.PROJECT_VERSION }}
           target: ${{ matrix.job.target }}
           nif-version: ${{ matrix.nif }}
           use-cross: ${{ matrix.job.os == 'ubuntu-22.04' && matrix.job.target != 'x86_64-unknown-linux-gnu' }}
@@ -40,9 +47,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.job.target }}-nif-${{ matrix.nif }}
-          path: |
-            native/simdxml_nif/priv/native/*
+          name: ${{ steps.build.outputs.file-name }}
+          path: ${{ steps.build.outputs.file-path }}
 
   release:
     needs: build_nif
@@ -58,5 +64,5 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*
+          files: artifacts/*
           generate_release_notes: true

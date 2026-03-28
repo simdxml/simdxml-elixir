@@ -9,5 +9,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 rustler = "0.37"
-simdxml = { path = "../../../simdxml/crates/simdxml" }
+simdxml = "0.2.1"
 self_cell = "1"
+memchr = "2"

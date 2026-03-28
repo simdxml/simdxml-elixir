@@ -109,24 +109,18 @@ pub fn eval<'a>(
         simdxml::CompiledXPath::compile(expr).map_err(|e: simdxml::SimdXmlError| e.to_string())?;
     let index = doc.index();
 
-    // Handle count() and boolean() expressions via optimized paths
-    if expr.starts_with("count(") {
-        let count = compiled
-            .eval_count(index)
-            .map_err(|e: simdxml::SimdXmlError| e.to_string())?;
-        return Ok((atoms::number(), count as f64).encode(env));
-    }
-    if expr.starts_with("boolean(") || expr == "true()" || expr == "false()" {
-        let exists = compiled
-            .eval_exists(index)
-            .map_err(|e: simdxml::SimdXmlError| e.to_string())?;
-        return Ok((atoms::boolean(), exists).encode(env));
-    }
-
-    // Default: evaluate as nodeset
+    // Evaluate as nodeset (published API only has eval -> Vec<XPathNode>)
     let nodes = compiled
         .eval(index)
         .map_err(|e: simdxml::SimdXmlError| e.to_string())?;
+
+    // Handle count() and boolean() wrappers
+    if expr.starts_with("count(") {
+        return Ok((atoms::number(), nodes.len() as f64).encode(env));
+    }
+    if expr.starts_with("boolean(") || expr == "true()" || expr == "false()" {
+        return Ok((atoms::boolean(), !nodes.is_empty()).encode(env));
+    }
     let mut terms = Vec::with_capacity(nodes.len());
     for node in &nodes {
         match node {
@@ -164,10 +158,11 @@ pub fn compiled_eval_count(
     compiled: ResourceArc<CompiledXPathResource>,
 ) -> Result<usize, String> {
     let index = doc.index();
-    compiled
+    let nodes = compiled
         .inner
-        .eval_count(index)
-        .map_err(|e: simdxml::SimdXmlError| e.to_string())
+        .eval(index)
+        .map_err(|e: simdxml::SimdXmlError| e.to_string())?;
+    Ok(nodes.len())
 }
 
 #[rustler::nif(schedule = "DirtyCpu")]
@@ -176,8 +171,9 @@ pub fn compiled_eval_exists(
     compiled: ResourceArc<CompiledXPathResource>,
 ) -> Result<bool, String> {
     let index = doc.index();
-    compiled
+    let nodes = compiled
         .inner
-        .eval_exists(index)
-        .map_err(|e: simdxml::SimdXmlError| e.to_string())
+        .eval(index)
+        .map_err(|e: simdxml::SimdXmlError| e.to_string())?;
+    Ok(!nodes.is_empty())
 }
