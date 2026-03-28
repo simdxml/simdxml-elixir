@@ -31,10 +31,7 @@ pub fn xpath_text(doc: ResourceArc<DocumentResource>, expr: &str) -> Result<Vec<
 }
 
 #[rustler::nif(schedule = "DirtyCpu")]
-pub fn xpath_string(
-    doc: ResourceArc<DocumentResource>,
-    expr: &str,
-) -> Result<Vec<String>, String> {
+pub fn xpath_string(doc: ResourceArc<DocumentResource>, expr: &str) -> Result<Vec<String>, String> {
     let index = doc.index();
     index
         .xpath_string(expr)

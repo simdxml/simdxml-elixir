@@ -1,5 +1,5 @@
-use rustler::ResourceArc;
 use rustler::Binary;
+use rustler::ResourceArc;
 use self_cell::self_cell;
 use simdxml::XmlIndex;
 
@@ -53,7 +53,10 @@ pub fn parse(binary: Binary) -> Result<ResourceArc<DocumentResource>, String> {
 }
 
 #[rustler::nif(schedule = "DirtyCpu")]
-pub fn parse_for_xpath(binary: Binary, xpath: &str) -> Result<ResourceArc<DocumentResource>, String> {
+pub fn parse_for_xpath(
+    binary: Binary,
+    xpath: &str,
+) -> Result<ResourceArc<DocumentResource>, String> {
     let xpath_owned = xpath.to_string();
     let bytes = binary.as_slice().to_vec();
     let inner = DocumentInner::try_new(bytes, |data| {

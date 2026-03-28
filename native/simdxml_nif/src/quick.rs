@@ -88,7 +88,9 @@ pub fn quick_extract_first(
         if memchr::memchr(b'<', &doc[text_start..close_offset]).is_some() {
             return None; // nested elements
         }
-        return std::str::from_utf8(&doc[text_start..close_offset]).ok().map(|s| s.to_string());
+        return std::str::from_utf8(&doc[text_start..close_offset])
+            .ok()
+            .map(|s| s.to_string());
     }
     Some(String::new()) // tag not found
 }
