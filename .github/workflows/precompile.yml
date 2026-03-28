@@ -1,68 +1,65 @@
-name: Precompile NIFs
+name: Build precompiled NIFs
+
 on:
   push:
     tags:
       - "v*"
 
-permissions:
-  contents: write
-
 jobs:
-  build_nif:
-    name: NIF ${{ matrix.nif }} - ${{ matrix.job.target }}
+  build_release:
+    name: NIF ${{ matrix.nif }} - ${{ matrix.job.target }} (${{ matrix.job.os }})
     runs-on: ${{ matrix.job.os }}
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
-        nif: ["2.15", "2.16", "2.17"]
+        nif: ["2.15"]
         job:
-          - { target: aarch64-apple-darwin, os: macos-14 }
-          - { target: x86_64-apple-darwin, os: macos-13 }
-          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04 }
-          - { target: x86_64-unknown-linux-musl, os: ubuntu-22.04 }
-          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04 }
-          - { target: aarch64-unknown-linux-musl, os: ubuntu-22.04 }
-          - { target: x86_64-pc-windows-msvc, os: windows-2022 }
+          - { target: aarch64-apple-darwin,        os: macos-15 }
+          - { target: x86_64-apple-darwin,         os: macos-15-intel }
+          - { target: x86_64-unknown-linux-gnu,    os: ubuntu-22.04 }
+          - { target: x86_64-unknown-linux-musl,   os: ubuntu-22.04,  use-cross: true }
+          - { target: aarch64-unknown-linux-gnu,   os: ubuntu-22.04,  use-cross: true }
+          - { target: aarch64-unknown-linux-musl,  os: ubuntu-22.04,  use-cross: true }
+          - { target: x86_64-pc-windows-msvc,      os: windows-2022 }
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source code
+        uses: actions/checkout@v4
 
-      - name: Extract version
+      - name: Extract project version
         shell: bash
         run: |
-          VERSION=$(grep '@version "' mix.exs | cut -d'"' -f2)
-          echo "PROJECT_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "PROJECT_VERSION=$(sed -n 's/^  @version "\(.*\)"/\1/p' mix.exs | head -n1)" >> $GITHUB_ENV
 
-      - name: Build NIF
-        id: build
-        uses: philss/rustler-precompiled-action@v1.1.4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.job.target }}
+
+      - name: Build the project
+        id: build-crate
+        uses: philss/rustler-precompiled-action@v1.1.5
         with:
           project-name: simdxml_nif
           project-version: ${{ env.PROJECT_VERSION }}
           target: ${{ matrix.job.target }}
           nif-version: ${{ matrix.nif }}
-          use-cross: ${{ matrix.job.os == 'ubuntu-22.04' && matrix.job.target != 'x86_64-unknown-linux-gnu' }}
-          project-dir: native/simdxml_nif
+          use-cross: ${{ matrix.job.use-cross }}
+          project-dir: "native/simdxml_nif"
 
-      - name: Upload artifact
+      - name: Artifact upload
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.build.outputs.file-name }}
-          path: ${{ steps.build.outputs.file-path }}
+          name: ${{ steps.build-crate.outputs.file-name }}
+          path: ${{ steps.build-crate.outputs.file-path }}
 
-  release:
-    needs: build_nif
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Create GitHub Release
+      - name: Publish archives and packages
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*
-          generate_release_notes: true
+          files: |
+            ${{ steps.build-crate.outputs.file-path }}
+        if: startsWith(github.ref, 'refs/tags/')
