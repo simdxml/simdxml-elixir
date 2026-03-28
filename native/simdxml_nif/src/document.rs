@@ -42,7 +42,7 @@ impl rustler::Resource for DocumentResource {}
 pub fn parse(binary: Binary) -> Result<ResourceArc<DocumentResource>, String> {
     let bytes = binary.as_slice().to_vec();
     let inner = DocumentInner::try_new(bytes, |data| {
-        let mut index = simdxml::parse(data).map_err(|e| e)?;
+        let mut index = simdxml::parse(data)?;
         // Build all indices eagerly so the index can be used immutably.
         index.ensure_indices();
         index.build_name_index();
@@ -76,15 +76,11 @@ pub fn parse_for_xpath(
 #[rustler::nif]
 pub fn document_root(doc: ResourceArc<DocumentResource>) -> Option<usize> {
     let index = doc.index();
-    for i in 0..index.tag_count() {
-        if index.depth(i) == 0
+    (0..index.tag_count()).find(|&i| {
+        index.depth(i) == 0
             && (index.tag_type(i) == simdxml::index::TagType::Open
                 || index.tag_type(i) == simdxml::index::TagType::SelfClose)
-        {
-            return Some(i);
-        }
-    }
-    None
+    })
 }
 
 #[rustler::nif]

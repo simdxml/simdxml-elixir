@@ -6,6 +6,7 @@ use rustler::{Binary, ResourceArc};
 pub struct QuickScannerResource {
     open_pattern: Vec<u8>,
     close_pattern: Vec<u8>,
+    #[allow(dead_code)]
     tag: String,
 }
 
