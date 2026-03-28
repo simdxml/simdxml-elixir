@@ -1,0 +1,62 @@
+name: Precompile NIFs
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build_nif:
+    name: NIF ${{ matrix.nif }} - ${{ matrix.job.target }}
+    runs-on: ${{ matrix.job.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        nif: ["2.15", "2.16", "2.17"]
+        job:
+          - { target: aarch64-apple-darwin, os: macos-14 }
+          - { target: x86_64-apple-darwin, os: macos-13 }
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04 }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-22.04 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04 }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-22.04 }
+          - { target: x86_64-pc-windows-msvc, os: windows-2022 }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build NIF
+        uses: philss/rustler-precompiled-action@v1.1.4
+        with:
+          project-name: simdxml_nif
+          project-version: ${{ github.ref_name }}
+          target: ${{ matrix.job.target }}
+          nif-version: ${{ matrix.nif }}
+          use-cross: ${{ matrix.job.os == 'ubuntu-22.04' && matrix.job.target != 'x86_64-unknown-linux-gnu' }}
+          project-dir: native/simdxml_nif
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.job.target }}-nif-${{ matrix.nif }}
+          path: |
+            native/simdxml_nif/priv/native/*
+
+  release:
+    needs: build_nif
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true

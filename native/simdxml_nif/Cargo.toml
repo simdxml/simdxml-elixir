@@ -1,0 +1,13 @@
+[package]
+name = "simdxml_nif"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "simdxml_nif"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.37"
+simdxml = { path = "../../../simdxml/crates/simdxml" }
+self_cell = "1"

@@ -1,0 +1,177 @@
+# Query Combinators
+
+SimdXml provides a composable, pipe-friendly DSL for building XPath queries
+without writing raw XPath strings. Queries are data structures that compile
+to XPath at evaluation time.
+
+## Setup
+
+```elixir
+Mix.install([{:simdxml, "~> 0.1.0"}])
+import SimdXml.Query
+
+xml = """
+<library>
+  <book lang="en">
+    <title>Elixir in Action</title>
+    <author>Sasa Juric</author>
+  </book>
+  <book lang="ja">
+    <title>Programming Elixir</title>
+    <author>Dave Thomas</author>
+  </book>
+  <book lang="en">
+    <title>Metaprogramming Elixir</title>
+    <author>Chris McCord</author>
+  </book>
+</library>
+"""
+
+doc = SimdXml.parse!(xml)
+```
+
+## Basic Usage
+
+```elixir
+# Build a query
+query = descendant("book") |> child("title") |> text()
+
+# Inspect the generated XPath
+IO.puts("XPath: #{SimdXml.Query.to_xpath(query)}")
+
+# Execute it
+SimdXml.query!(doc, query)
+```
+
+## Axis Constructors
+
+Each constructor starts a new query from a given axis:
+
+| Function | XPath | Description |
+|----------|-------|-------------|
+| `descendant("book")` | `//book` | Match anywhere in the document |
+| `child("title")` | `title` | Match direct children |
+| `self_node("item")` | `self::item` | Match the context node |
+| `parent("section")` | `parent::section` | Match the parent |
+| `ancestor("div")` | `ancestor::div` | Match ancestors |
+| `following_sibling("p")` | `following-sibling::p` | Match following siblings |
+| `preceding_sibling("p")` | `preceding-sibling::p` | Match preceding siblings |
+| `attribute("href")` | `attribute::href` | Match attributes |
+
+Pass `:any` (or no argument) for wildcards: `descendant()` produces `//*`.
+
+```elixir
+# Try different axes
+for {label, q} <- [
+      {"descendant", descendant("book")},
+      {"child wildcard", child()},
+      {"self", self_node("x")},
+      {"parent", parent("section")},
+      {"ancestor", ancestor("div")},
+      {"following-sibling", following_sibling("p")},
+      {"preceding-sibling", preceding_sibling("p")},
+      {"attribute", attribute("href")}
+    ] do
+  {label, SimdXml.Query.to_xpath(q)}
+end
+```
+
+## Pipe Composition
+
+Chain steps with the pipe operator:
+
+```elixir
+queries = [
+  {"library/book/title", child("library") |> child("book") |> child("title")},
+  {"//book//title", descendant("book") |> descendant("title")},
+  {"//book/parent::*", descendant("book") |> parent()}
+]
+
+for {label, q} <- queries do
+  {label, SimdXml.Query.to_xpath(q)}
+end
+```
+
+## Predicates
+
+Filter results with predicates:
+
+```elixir
+predicates = [
+  {"attr value", descendant("book") |> where_attr("lang", "en")},
+  {"attr exists", descendant("book") |> has_attr("lang")},
+  {"first", descendant("book") |> first()},
+  {"last", descendant("book") |> last()},
+  {"position", descendant("book") |> at(2)},
+  {"expression", descendant("book") |> where_expr("count(./title) > 0")}
+]
+
+for {label, q} <- predicates do
+  {label, SimdXml.Query.to_xpath(q)}
+end
+```
+
+```elixir
+# Execute a predicate query
+q = descendant("book") |> where_attr("lang", "en") |> child("title") |> text()
+IO.puts("XPath: #{SimdXml.Query.to_xpath(q)}")
+SimdXml.query!(doc, q)
+```
+
+## Return Types
+
+By default, queries return text (`:text`). Modify with terminal functions:
+
+```elixir
+base = descendant("book")
+
+return_types = [
+  {"text", base |> text()},
+  {"string", base |> string()},
+  {"nodes", base |> nodes()},
+  {"count", base |> count()},
+  {"exists", base |> exists()}
+]
+
+for {label, q} <- return_types do
+  {label, q.return_type}
+end
+```
+
+## Union
+
+Combine multiple queries:
+
+```elixir
+q = union(descendant("title"), descendant("author"))
+IO.puts("XPath: #{SimdXml.Query.to_xpath(q)}")
+SimdXml.query!(doc, q |> text())
+```
+
+## Reusable Fragments
+
+Queries are just data -- compose and reuse them freely:
+
+```elixir
+# Define reusable fragments
+books = descendant("book")
+english_books = books |> where_attr("lang", "en")
+titles = english_books |> child("title") |> text()
+authors = english_books |> child("author") |> text()
+
+%{
+  titles: SimdXml.query!(doc, titles),
+  authors: SimdXml.query!(doc, authors)
+}
+```
+
+## Equivalence Table
+
+| SimdXml.Query | XPath |
+|---------------|-------|
+| `descendant("a")` | `//a` |
+| `descendant("a") \|> child("b")` | `//a/b` |
+| `descendant("a") \|> where_attr("x", "1")` | `//a[@x='1']` |
+| `descendant("a") \|> first()` | `//a[1]` |
+| `descendant("a") \|> child("b") \|> text()` | `//a/b/text()` |
+| `union(descendant("a"), descendant("b"))` | `//a \| //b` |

@@ -1,0 +1,133 @@
+# Getting Started
+
+## Installation
+
+Add `simdxml` to your `mix.exs` dependencies:
+
+```elixir
+Mix.install([{:simdxml, "~> 0.1.0"}])
+```
+
+Precompiled NIF binaries are available for macOS (Apple Silicon, Intel),
+Linux (x86_64, aarch64, musl), and Windows. If a precompiled binary is not
+available for your platform, set `SIMDXML_BUILD=1` to compile from source
+(requires Rust toolchain).
+
+## Parsing XML
+
+```elixir
+xml = """
+<library>
+  <book lang="en">
+    <title>Elixir in Action</title>
+    <author>Sasa Juric</author>
+  </book>
+  <book lang="ja">
+    <title>Programming Elixir</title>
+    <author>Dave Thomas</author>
+  </book>
+</library>
+"""
+
+doc = SimdXml.parse!(xml)
+```
+
+The returned `%SimdXml.Document{}` is an opaque, immutable reference to a
+Rust-side structural index. The index uses ~16 bytes per XML tag (vs ~35 for
+a typical DOM), and the original XML bytes remain on the Rust side.
+
+## Querying with XPath
+
+```elixir
+# Direct child text of matching elements
+SimdXml.xpath_text!(doc, "//title")
+```
+
+```elixir
+# All descendant text (XPath string-value)
+SimdXml.xpath_string!(doc, "//book")
+```
+
+```elixir
+# With predicates
+SimdXml.xpath_text!(doc, "//book[@lang='en']/title")
+```
+
+Every function has both `ok/error` and `!` (bang) variants:
+
+```elixir
+{:ok, titles} = SimdXml.xpath_text(doc, "//title")
+titles
+```
+
+## Navigating Elements
+
+```elixir
+root = SimdXml.Document.root(doc)
+```
+
+```elixir
+root.tag
+```
+
+```elixir
+# Elements implement Enumerable -- iterate over children
+Enum.map(root, & &1.tag)
+```
+
+```elixir
+# Access attributes
+[book | _] = SimdXml.Element.children(root)
+
+%{
+  lang: SimdXml.Element.get(book, "lang"),
+  attributes: SimdXml.Element.attributes(book),
+  parent_tag: SimdXml.Element.parent(book).tag
+}
+```
+
+```elixir
+# Context-sensitive XPath
+SimdXml.Element.xpath_text(book, "./title")
+```
+
+## Compiled Queries
+
+When querying many documents with the same expression, compile it once:
+
+```elixir
+query = SimdXml.compile!("//title")
+
+doc1 = SimdXml.parse!("<r><title>First</title></r>")
+doc2 = SimdXml.parse!("<r><title>Second</title></r>")
+
+{SimdXml.eval_text!(doc1, query), SimdXml.eval_text!(doc2, query)}
+```
+
+```elixir
+# Optimized operations
+{SimdXml.eval_count!(doc, query), SimdXml.eval_exists?(doc, query)}
+```
+
+## Result Helpers
+
+```elixir
+SimdXml.Result.all(doc, "//title")
+```
+
+```elixir
+SimdXml.Result.one(doc, "//title")
+```
+
+```elixir
+SimdXml.Result.fetch(doc, "//title")
+```
+
+```elixir
+SimdXml.Result.fetch(doc, "//missing")
+```
+
+## Next Steps
+
+- [Query Combinators](query-combinators.livemd) -- build queries without raw XPath strings
+- [Performance](performance.livemd) -- batch processing, quick grep mode, benchmarks

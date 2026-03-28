@@ -1,0 +1,161 @@
+# Performance
+
+SimdXml uses SIMD instructions (NEON on ARM, AVX2/SSE4.2 on x86) to parse
+XML into a flat structural index at near-memory-bandwidth speed. This page
+covers the different performance tiers and when to use each.
+
+## Setup
+
+```elixir
+Mix.install([{:simdxml, "~> 0.1.0"}])
+```
+
+## Choosing the Right Tool
+
+| Scenario | API | Speed |
+|----------|-----|-------|
+| One query on one document | `SimdXml.xpath_text!/2` | Fast |
+| Same query on many documents | `SimdXml.Batch.eval_text_bloom/2` | Fastest |
+| Simple `//tagname` on many docs | `SimdXml.Quick` | Memory bandwidth |
+| Known query at parse time | `SimdXml.parse_for_xpath!/2` | Faster parse |
+| Repeated queries on one document | `SimdXml.compile!/1` + `eval_text!/2` | Amortized |
+
+## Compiled Queries
+
+`SimdXml.compile!/1` parses the XPath expression once. Reusing the compiled
+query avoids re-parsing the expression string on every call:
+
+```elixir
+query = SimdXml.compile!("//item")
+
+xml_documents = Enum.map(1..100, fn i ->
+  "<r><item>Document #{i}</item></r>"
+end)
+
+results = for xml <- xml_documents do
+  doc = SimdXml.parse!(xml)
+  SimdXml.eval_text!(doc, query)
+end
+
+{length(results), List.first(results), List.last(results)}
+```
+
+The compiled query also enables optimized `eval_count/2` and `eval_exists?/2`
+that can short-circuit without materializing the full node set:
+
+```elixir
+doc = SimdXml.parse!("<r><item>a</item><item>b</item><item>c</item></r>")
+query = SimdXml.compile!("//item")
+
+{SimdXml.eval_count!(doc, query), SimdXml.eval_exists?(doc, query)}
+```
+
+## Batch Processing
+
+For processing thousands of XML documents with the same query, batch
+evaluation avoids per-document NIF call overhead:
+
+```elixir
+docs = Enum.map(1..1000, fn i ->
+  "<patent><claim>Claim #{i}</claim></patent>"
+end)
+
+query = SimdXml.compile!("//claim")
+
+# Bloom filtering skips documents that can't possibly match
+{:ok, results} = SimdXml.Batch.eval_text_bloom(docs, query)
+
+"#{length(results)} documents processed, first: #{inspect(hd(hd(results)))}"
+```
+
+Bloom filtering prescans each document's bytes for target tag names. Documents
+that fail the bloom check are skipped entirely (no parsing). For selective
+queries where most documents don't match, this can be 10x+ faster:
+
+```elixir
+# 990 documents that DON'T contain "rare_tag", 10 that do
+non_matching = Enum.map(1..990, fn i -> "<r><common>#{i}</common></r>" end)
+matching = Enum.map(1..10, fn i -> "<r><rare_tag>found #{i}</rare_tag></r>" end)
+all_docs = non_matching ++ matching
+
+query = SimdXml.compile!("//rare_tag")
+{:ok, results} = SimdXml.Batch.eval_text_bloom(all_docs, query)
+
+match_count = Enum.count(results, fn r -> r != [] end)
+"#{match_count} matches out of #{length(all_docs)} documents"
+```
+
+## Quick Grep Mode
+
+For the simplest case -- extracting a single tag from raw bytes without
+building a structural index:
+
+```elixir
+scanner = SimdXml.Quick.new("claim")
+xml = "<patent><claim>Important claim text</claim><claim>Another</claim></patent>"
+
+%{
+  first: SimdXml.Quick.extract_first(scanner, xml),
+  exists?: SimdXml.Quick.exists?(scanner, xml),
+  count: SimdXml.Quick.count(scanner, xml)
+}
+```
+
+Quick mode is ideal for:
+- Checking if a tag exists before doing a full parse
+- Extracting a single field from millions of small documents
+- Pre-filtering documents in a pipeline
+
+It does NOT support:
+- XPath predicates or complex paths
+- Nested element content (returns `nil` if the matched tag has child elements)
+- Attributes
+
+## Query-Driven Parsing
+
+When you know the XPath query at parse time, `parse_for_xpath!/2` uses lazy
+parsing to only index tags relevant to the query:
+
+```elixir
+xml = """
+<catalog>
+  <category name="fiction">
+    <book><title>Novel A</title><isbn>123</isbn></book>
+    <book><title>Novel B</title><isbn>456</isbn></book>
+  </category>
+  <category name="nonfiction">
+    <book><title>Guide C</title><isbn>789</isbn></book>
+  </category>
+</catalog>
+"""
+
+# Only indexes <title> tags and their ancestors -- faster for large docs
+doc = SimdXml.parse_for_xpath!(xml, "//title")
+SimdXml.xpath_text!(doc, "//title")
+```
+
+## Memory Model
+
+- **Documents** are immutable Rust-side allocations (~16 bytes/tag), reference-counted by the BEAM GC
+- **Elements** are lightweight Elixir structs holding a document reference + integer index (no Rust allocation per element)
+- **Compiled queries** are small Rust-side ASTs, shareable across processes
+- **Quick scanners** are pre-compiled memchr patterns, shareable across processes
+
+The XML bytes are copied once at parse time (from BEAM heap to Rust heap).
+All subsequent queries reference the Rust-side copy without additional copies
+until results are materialized back to Elixir strings.
+
+## vs. SweetXml
+
+SimdXml is typically 5-50x faster than SweetXml (which wraps xmerl) depending
+on document size and query complexity. Additionally:
+
+- No atom creation from untrusted XML (SweetXml creates atoms for tag names)
+- No XXE vulnerability (SimdXml does not process DTDs or entities)
+- Constant-factor memory: ~16 bytes/tag vs xmerl's ~350 bytes/node
+
+## vs. Saxy
+
+For SAX-style streaming, Saxy is a solid pure-Elixir choice. SimdXml is
+faster for XPath queries but requires the full document in memory. Use Saxy
+when you need streaming over very large files that don't fit in memory.
